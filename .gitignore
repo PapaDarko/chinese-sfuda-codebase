@@ -1,3 +1,8 @@
+# Specific .gitignore rules
+data/* # ignore data files - too large for version control
+!data/.gitkeep # keep the empty data directory in version control
+
+# <---- .gitignore template ---->
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

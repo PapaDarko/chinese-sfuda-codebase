@@ -1,0 +1,54 @@
+{
+  "tags": [
+    {
+      "tag": "(0020,0037)",
+      "name": "Image Orientation (Patient)",
+      "description": "Determine image-plane orientation"
+    },
+    {
+      "tag": "(0028,1050)",
+      "name": "Window Center",
+      "description": "Identify the stored display window"
+    },
+    {
+      "tag": "(0028,1051)",
+      "name": "Window Width",
+      "description": "Identify the stored display window"
+    },
+    {
+      "tag": "(0010,0020)",
+      "name": "Patient ID",
+      "description": "Group scans for patient-level splitting"
+    },
+    {
+      "tag": "(0020,000D)",
+      "name": "Study Instance UID",
+      "description": "Identify each study"
+    },
+    {
+      "tag": "(0020,000E)",
+      "name": "Series Instance UID",
+      "description": "Identify each image series"
+    },
+    {
+      "tag": "(0008,0018)",
+      "name": "SOP Instance UID",
+      "description": "Match XML annotations to individual DICOM images"
+    },
+    {
+      "tag": "(0008,0070)",
+      "name": "Manufacturer",
+      "description": "Identify the manufacturer of the equipment"
+    },
+    {
+      "tag": "(0008,1090)",
+      "name": "Manufacturer's Model Name",
+      "description": "Identify the model of the equipment"
+    },
+    {
+      "tag": "(0018,1210)",
+      "name": "Convolution Kernel",
+      "description": "Identify the reconstruction convolution kernel"
+    }
+  ]
+}
