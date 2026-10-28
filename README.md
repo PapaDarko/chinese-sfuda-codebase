@@ -10,9 +10,9 @@ The datasets used for this work are from:
 ## Repository layout
 
 - `preprocessing/dicom_tag_extractor.py` — extracts a curated subset of DICOM metadata and writes patient-level JSON aggregates.
-- `preprocessing/dicom_to_png.py` — converts DICOM CT slices/volumes to windowed grayscale PNGs.
+- `preprocessing/dicom_to_png.py` — converts DICOM CT slices/volumes to windowed grayscale PNGs, optionally limited to XML-annotated images.
+- `preprocessing/organize_annotation_xmls.py` — moves flat XML annotations into their patient folders under `data/input/`.
 - `data/dicom_tag_reference.json` — reference list of DICOM tags retained during metadata extraction.
-- `model/model_a.py` — model scaffold / experimental entry point.
 
 ## Setup
 
@@ -20,6 +20,14 @@ Install the required Python dependencies:
 
 ```sh
 python -m pip install -r requirements.txt
+```
+
+## Repository validation
+
+Run a quick syntax check across the project before using the scripts:
+
+```sh
+python -m compileall model preprocessing
 ```
 
 ## Extract DICOM metadata
@@ -65,6 +73,26 @@ python preprocessing/dicom_to_png.py /path/to/dicom-input /path/to/png-output \
   --window-center 40 --window-width 400
 ```
 
+To avoid storing PNGs for unannotated slices, add `--annotations-only`:
+
+```sh
+python preprocessing/dicom_to_png.py \
+  --window-center 40 --window-width 400 --annotations-only
+```
+
+In this mode, the script reads annotations from
+`data/input/<patient>/`, where each XML file sits alongside that patient's
+DICOM files. It numerically orders the DICOM filenames (regardless of the
+starting number), then uses each
+`<patient id>_<helpful number>.xml` filename, and converts only those files to
+PNG in `data/output/`. The selected one-based DICOM index is the number of
+convertible DICOM files minus the helpful number. For example, with 70 DICOM
+files and helpful number 41, the selected image is number 29 in filename
+order. Multiple XML files can select multiple images. All frames of a selected
+multiframe DICOM are converted. The selected files receive the same HU
+windowing and 512 x 512 resizing as a full conversion. Malformed or
+out-of-range annotations stop the run before any PNGs are written.
+
 The conversion process:
 
 - reads each DICOM file
@@ -74,3 +102,25 @@ The conversion process:
 - writes one PNG per frame for multiframe grayscale DICOMs
 
 By default, the input files are kept. Pass `--delete-input` to remove successfully converted DICOM files after export; skipped or failed files are left untouched.
+
+## Organize XML annotations
+
+Move XML files directly inside `data/` into their patient folders under
+`data/input/`:
+
+```sh
+python preprocessing/organize_annotation_xmls.py
+```
+
+For each file named `<patient id>_<number>.xml`, the script moves it to
+`data/input/<patient id>/`. Override the data folder with a positional
+argument:
+
+```sh
+python preprocessing/organize_annotation_xmls.py /path/to/data
+```
+
+The script validates filenames and checks for existing destination files before
+moving anything; it does not overwrite existing annotations.
+
+The annotation-selection workflow is already handled by `dicom_to_png.py` via `--annotations-only`, so a separate PNG filter is unnecessary when generating the selected subset directly from DICOM inputs.
