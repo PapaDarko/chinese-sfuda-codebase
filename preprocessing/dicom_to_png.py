@@ -149,6 +149,50 @@ def dicom_sort_key(path):
     return number, natural_name
 
 
+def annotation_dicom_candidates(input_dir):
+    candidate_paths = []
+    skipped = 0
+    for patient_dir in sorted(path for path in input_dir.iterdir() if path.is_dir()):
+        for source_path in sorted(
+            path
+            for path in patient_dir.iterdir()
+            if path.is_file() and path.suffix.casefold() == ".dcm"
+        ):
+            try:
+                validate_dicom_header(source_path)
+            except (
+                InvalidDicomError,
+                OSError,
+                ValueError,
+                TypeError,
+                RuntimeError,
+                NotImplementedError,
+                EOFError,
+                AttributeError,
+            ) as error:
+                logging.warning("Skipping %s: %s", source_path, error)
+                skipped += 1
+                continue
+            candidate_paths.append(source_path)
+    return candidate_paths, skipped
+
+
+def annotation_dicom_path(xml_path, patient_id, dicom_paths):
+    match = re.fullmatch(rf"{re.escape(patient_id)}_(\d+)", xml_path.stem)
+    if match is None:
+        raise ValueError(f"Annotation filename must be {patient_id}_<number>.xml")
+
+    helpful_number = int(match.group(1))
+    image_number = len(dicom_paths) - helpful_number
+    if helpful_number < 1 or not 1 <= image_number <= len(dicom_paths):
+        raise ValueError(
+            f"selected image {image_number} is outside the valid range "
+            f"1-{len(dicom_paths)} ({len(dicom_paths)} DICOM files, "
+            f"helpful number {helpful_number})"
+        )
+    return dicom_paths[image_number - 1]
+
+
 def annotated_dicom_selections(input_dir, candidate_paths):
     dicoms_by_patient = {}
     for source_path in candidate_paths:
@@ -177,31 +221,16 @@ def annotated_dicom_selections(input_dir, candidate_paths):
             continue
 
         for xml_path in xml_paths:
-            match = re.fullmatch(rf"{re.escape(patient_id)}_(\d+)", xml_path.stem)
-            if match is None:
-                logging.error(
-                    "Annotation filename must be %s_<number>.xml: %s",
-                    patient_id,
-                    xml_path,
+            try:
+                selected_path = annotation_dicom_path(
+                    xml_path, patient_id, dicom_paths
                 )
-                errors += 1
-                continue
-            helpful_number = int(match.group(1))
-            image_number = len(dicom_paths) - helpful_number
-            if helpful_number < 1 or not 1 <= image_number <= len(dicom_paths):
-                logging.error(
-                    "Annotation %s selects image %d, outside the valid range 1-%d "
-                    "(%d DICOM files, helpful number %d)",
-                    xml_path,
-                    image_number,
-                    len(dicom_paths),
-                    len(dicom_paths),
-                    helpful_number,
-                )
+            except ValueError as error:
+                logging.error("Could not select a DICOM for %s: %s", xml_path, error)
                 errors += 1
                 continue
 
-            selected_paths.add(dicom_paths[image_number - 1])
+            selected_paths.add(selected_path)
 
     if errors:
         logging.error(
@@ -240,30 +269,7 @@ def main():
     converted_paths = []
     selected_paths = None
     if args.annotations_only:
-        candidate_paths = []
-        for patient_dir in sorted(path for path in input_dir.iterdir() if path.is_dir()):
-            for source_path in sorted(
-                path
-                for path in patient_dir.iterdir()
-                if path.is_file() and path.suffix.casefold() == ".dcm"
-            ):
-                try:
-                    validate_dicom_header(source_path)
-                except (
-                    InvalidDicomError,
-                    OSError,
-                    ValueError,
-                    TypeError,
-                    RuntimeError,
-                    NotImplementedError,
-                    EOFError,
-                    AttributeError,
-                ) as error:
-                    logging.warning("Skipping %s: %s", source_path, error)
-                    skipped += 1
-                    continue
-                candidate_paths.append(source_path)
-
+        candidate_paths, skipped = annotation_dicom_candidates(input_dir)
         selected_paths = annotated_dicom_selections(input_dir, candidate_paths)
         if selected_paths is None:
             return 1

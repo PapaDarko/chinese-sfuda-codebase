@@ -1,33 +1,75 @@
 #!/usr/bin/env python3
-"""Move flat XML annotation files into their patient folders."""
+"""Aggregate XML bounding-box annotations into a CSV file."""
 
 import argparse
+import csv
 import logging
 import re
-import shutil
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
+if __package__:
+    from .dicom_to_png import (
+        annotation_dicom_candidates,
+        annotation_dicom_path,
+        dicom_sort_key,
+    )
+else:
+    from dicom_to_png import (
+        annotation_dicom_candidates,
+        annotation_dicom_path,
+        dicom_sort_key,
+    )
 
-ANNOTATION_FILENAME = re.compile(r"(?P<patient_id>.+)_(?P<number>\d+)\.xml", re.IGNORECASE)
+
+CSV_FIELDS = ("filename", "xmin", "ymin", "xmax", "ymax")
 
 
 def parse_arguments():
     project_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Move XML files directly inside the data folder into "
-            "data/input folders named for their patient IDs."
+            "Aggregate XML annotations from the DICOM input folder into "
+            "annotations.csv."
         )
     )
     parser.add_argument(
         "data_dir",
         type=Path,
         nargs="?",
-        default=project_dir / "data",
-        help="Data folder containing XML files and the input directory (default: data)",
+        default=project_dir / "data" / "input",
+        help="DICOM input folder containing XML annotations (default: data/input)",
     )
     return parser.parse_args()
+
+
+def read_annotation_rows(xml_path, image_filename):
+    root = ET.parse(xml_path).getroot()
+    objects = root.findall("object")
+    if not objects:
+        raise ValueError("missing <object>")
+
+    rows = []
+    for index, obj in enumerate(objects, start=1):
+        box = obj.find("bndbox")
+        if box is None:
+            raise ValueError(f"object {index} is missing <bndbox>")
+
+        coordinates = {}
+        for field in CSV_FIELDS[1:]:
+            value = box.findtext(field)
+            if value is None:
+                raise ValueError(f"object {index} is missing <{field}>")
+            try:
+                coordinates[field] = int(value.strip())
+            except ValueError as error:
+                raise ValueError(
+                    f"object {index} has a non-integer <{field}> value"
+                ) from error
+
+        rows.append({"filename": image_filename, **coordinates})
+    return rows
 
 
 def main():
@@ -39,53 +81,79 @@ def main():
         logging.error("Data folder does not exist or is not a directory: %s", data_dir)
         return 2
 
-    xml_paths = sorted(
-        path
-        for path in data_dir.iterdir()
-        if path.is_file() and path.suffix.casefold() == ".xml"
-    )
-    if not xml_paths:
-        logging.error("No XML annotation files found directly inside %s", data_dir)
-        return 1
-
-    moves = []
-    errors = 0
-    for source_path in xml_paths:
-        match = ANNOTATION_FILENAME.fullmatch(source_path.name)
-        if match is None:
-            logging.error(
-                "Annotation filename must be <patient id>_<number>.xml: %s",
-                source_path,
+    xml_paths = []
+    for path in sorted(data_dir.iterdir()):
+        if path.is_file() and path.suffix.casefold() == ".xml":
+            xml_paths.append(path)
+        elif path.is_dir():
+            xml_paths.extend(
+                child
+                for child in sorted(path.iterdir())
+                if child.is_file() and child.suffix.casefold() == ".xml"
             )
-            errors += 1
-            continue
+    if not xml_paths:
+                logging.error(
+                    "No XML annotations found in %s or its patient folders.", data_dir
+                )
+                return 1
 
-        patient_id = match.group("patient_id")
-        if patient_id in {".", "..", "input"} or Path(patient_id).name != patient_id:
-            logging.error("Invalid patient ID in annotation filename: %s", source_path)
-            errors += 1
-            continue
+    candidate_paths, _ = annotation_dicom_candidates(data_dir)
+    dicoms_by_patient = {}
+    for path in candidate_paths:
+        dicoms_by_patient.setdefault(path.parent.name, []).append(path)
 
-        destination = data_dir / "input" / patient_id / source_path.name
-        if destination.exists():
-            logging.error("Destination already exists; refusing to overwrite: %s", destination)
+    rows = []
+    errors = 0
+    for xml_path in xml_paths:
+        try:
+            if xml_path.parent == data_dir:
+                match = re.fullmatch(r"(.+)_(\d+)", xml_path.stem)
+                if match is None:
+                    raise ValueError(
+                        "annotation filename must be <patient id>_<number>.xml"
+                    )
+                patient_id = match.group(1)
+            else:
+                patient_id = xml_path.parent.name
+
+            dicom_paths = sorted(
+                dicoms_by_patient.get(patient_id, []),
+                key=dicom_sort_key,
+            )
+            if not dicom_paths:
+                raise ValueError(f"no convertible DICOM files found for {patient_id}")
+
+            selected_dicom = annotation_dicom_path(
+                xml_path, patient_id, dicom_paths
+            )
+            image_filename = (
+                selected_dicom.relative_to(data_dir).with_suffix(".png").as_posix()
+            )
+            rows.extend(read_annotation_rows(xml_path, image_filename))
+        except (ET.ParseError, OSError, ValueError) as error:
+            logging.error("Could not process annotation %s: %s", xml_path, error)
             errors += 1
-            continue
-        moves.append((source_path, destination))
 
     if errors:
-        logging.error("Could not validate %d XML file(s); no files were moved.", errors)
+        logging.error("Could not process %d XML file(s); no CSV was written.", errors)
         return 1
 
-    for source_path, destination in moves:
-        try:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source_path), str(destination))
-        except OSError as error:
-            logging.error("Could not move %s to %s: %s", source_path, destination, error)
-            return 1
+    csv_path = data_dir / "annotations.csv"
+    try:
+        with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+    except OSError as error:
+        logging.error("Could not write annotation CSV %s: %s", csv_path, error)
+        return 1
 
-    logging.info("Moved %d XML annotation file(s) into patient folders.", len(moves))
+    logging.info(
+        "Wrote %d annotation(s) from %d XML file(s) to %s.",
+        len(rows),
+        len(xml_paths),
+        csv_path,
+    )
     return 0
 
 

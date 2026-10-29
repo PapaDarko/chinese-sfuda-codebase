@@ -12,7 +12,7 @@ The datasets used for this work are from:
 - `requirements.txt` — Python dependencies required by the preprocessing utilities.
 - `preprocessing/dicom_tag_extractor.py` — extracts a curated subset of DICOM metadata and writes patient-level JSON aggregates.
 - `preprocessing/dicom_to_png.py` — converts DICOM CT slices/volumes to windowed grayscale PNGs, optionally limited to XML-annotated images.
-- `preprocessing/organize_annotation_xmls.py` — moves flat XML annotations into their patient folders under `data/input/`.
+- `preprocessing/organize_annotation_xmls.py` — aggregates XML annotations into `data/input/annotations.csv`.
 - `preprocessing/resolution_check.py` — recursively verifies that PNGs under `data/output/` are 512 x 512 pixels.
 - `preprocessing/grayscale_check.py` — recursively checks PNGs under `data/output/` for grayscale images.
 - `data/dicom_tag_reference.json` — reference list of DICOM tags retained during metadata extraction.
@@ -90,18 +90,17 @@ python preprocessing/dicom_to_png.py \
   --window-center 40 --window-width 400 --annotations-only
 ```
 
-In this mode, the script reads annotations from
-`data/input/<patient>/`, where each XML file sits alongside that patient's
-DICOM files. It numerically orders the DICOM filenames (regardless of the
-starting number), then uses each
-`<patient id>_<helpful number>.xml` filename, and converts only those files to
-PNG in `data/output/`. The selected one-based DICOM index is the number of
-convertible DICOM files minus the helpful number. For example, with 70 DICOM
-files and helpful number 41, the selected image is number 29 in filename
-order. Multiple XML files can select multiple images. All frames of a selected
-multiframe DICOM are converted. The selected files receive the same HU
-windowing and 512 x 512 resizing as a full conversion. Malformed or
-out-of-range annotations stop the run before any PNGs are written.
+In this mode, the script reads annotations from `data/input/<patient>/` (or
+from the root of `data/input/` when the patient ID is in the XML filename).
+It orders valid DICOMs in each patient folder by filename, then uses each
+`<patient id>_<helpful number>.xml` filename to select an image. The selected
+one-based DICOM index is the number of valid DICOM files minus the helpful
+number. For example, with 70 valid DICOM files and helpful number 41, it
+selects the 29th file in filename order. Multiple XML files can select multiple
+images. All frames of a selected multiframe DICOM are converted. The selected
+files receive the same HU windowing and 512 x 512 resizing as a full
+conversion. Malformed or out-of-range annotations stop the run before any
+PNGs are written.
 
 The conversion process:
 
@@ -143,24 +142,36 @@ To check a different folder, pass it as an argument:
 python preprocessing/grayscale_check.py /path/to/png-output
 ```
 
-## Organize XML annotations
+## Aggregate XML annotations
 
-Move XML files directly inside `data/` into their patient folders under
-`data/input/`:
+Aggregate XML files in `data/input/` and its patient folders into
+`data/input/annotations.csv`:
 
 ```sh
 python preprocessing/organize_annotation_xmls.py
 ```
 
-For each file named `<patient id>_<number>.xml`, the script moves it to
-`data/input/<patient id>/`. Override the data folder with a positional
+For each `<patient id>_<helpful number>.xml`, the script uses the same
+selection logic as `dicom_to_png.py`: it filters invalid DICOMs, sorts the
+remaining files in that patient's folder, and selects the file at
+`valid file count - helpful number`. The CSV columns are `filename`, `xmin`,
+`ymin`, `xmax`, and `ymax`. `filename` is the selected DICOM's PNG path
+relative to the PNG output folder, preserving the patient folder; it is not the
+XML's `<filename>` value. For example, if the selected DICOM is
+`data/input/0001/_99.DCM`, the CSV filename is `0001/_99.png`. XML files with
+multiple objects produce one row per bounding box, and the XML files are left
+unchanged. The CSV is written to the selected input folder and replaces any
+existing `annotations.csv` there. Override the input folder with a positional
 argument:
 
 ```sh
-python preprocessing/organize_annotation_xmls.py /path/to/data
+python preprocessing/organize_annotation_xmls.py /path/to/dicom-input
 ```
 
-The script validates filenames and checks for existing destination files before
-moving anything; it does not overwrite existing annotations.
+If any XML file is malformed or missing bounding-box coordinates, or its
+helpful number cannot select a DICOM, the script reports the error and does not
+write the CSV.
 
-The annotation-selection workflow is already handled by `dicom_to_png.py` via `--annotations-only`, so a separate PNG filter is unnecessary when generating the selected subset directly from DICOM inputs.
+The annotation-selection workflow is already handled by `dicom_to_png.py` via
+`--annotations-only`, so a separate PNG filter is unnecessary when generating
+the selected subset directly from DICOM inputs.
