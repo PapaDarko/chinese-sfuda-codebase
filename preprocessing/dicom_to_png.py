@@ -133,7 +133,9 @@ def convert_file(source_path, destination_base, center, width):
             image = 255 - image
         destination = destinations[frame_index]
         destination.parent.mkdir(parents=True, exist_ok=True)
-        png = Image.fromarray(image).resize(OUTPUT_SIZE, Image.Resampling.BILINEAR)
+        png = Image.fromarray(image).convert("RGB").resize(
+            OUTPUT_SIZE, Image.Resampling.BILINEAR
+        )
         png.save(destination, format="PNG")
 
 

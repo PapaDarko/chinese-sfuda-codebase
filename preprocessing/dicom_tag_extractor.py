@@ -173,6 +173,11 @@ def parse_arguments():
             "writing one dicom_properties.json per patient folder"
         ),
     )
+    parser.add_argument(
+        "--delete-input",
+        action="store_true",
+        help="Delete successfully processed DICOM files after writing the aggregates",
+    )
     return parser.parse_args()
 
 
@@ -221,6 +226,7 @@ def main():
     patient_aggregates = {}
     processed = 0
     skipped = 0
+    processed_paths = []
 
     for source_path in paths:
         relative_path = source_path.relative_to(input_dir)
@@ -262,6 +268,7 @@ def main():
 
         processed += 1
         patient_data["processed"] += 1
+        processed_paths.append(source_path)
 
     if processed == 0:
         logging.error("No readable DICOM files were found in %s.", input_dir)
@@ -294,6 +301,20 @@ def main():
         logging.info("Metadata aggregate written to %s", destination)
 
     logging.info("Processed %d DICOM files; skipped %d files.", processed, skipped)
+    if args.delete_input:
+        deletion_errors = 0
+        for source_path in processed_paths:
+            try:
+                source_path.unlink()
+            except OSError as error:
+                logging.error("Could not delete processed input file %s: %s", source_path, error)
+                deletion_errors += 1
+        logging.info(
+            "Deleted %d processed input files.",
+            len(processed_paths) - deletion_errors,
+        )
+        if deletion_errors:
+            return 1
     return 0
 
 

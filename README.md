@@ -9,9 +9,12 @@ The datasets used for this work are from:
 
 ## Repository layout
 
+- `requirements.txt` — Python dependencies required by the preprocessing utilities.
 - `preprocessing/dicom_tag_extractor.py` — extracts a curated subset of DICOM metadata and writes patient-level JSON aggregates.
 - `preprocessing/dicom_to_png.py` — converts DICOM CT slices/volumes to windowed grayscale PNGs, optionally limited to XML-annotated images.
 - `preprocessing/organize_annotation_xmls.py` — moves flat XML annotations into their patient folders under `data/input/`.
+- `preprocessing/resolution_check.py` — recursively verifies that PNGs under `data/output/` are 512 x 512 pixels.
+- `preprocessing/grayscale_check.py` — recursively checks PNGs under `data/output/` for grayscale images.
 - `data/dicom_tag_reference.json` — reference list of DICOM tags retained during metadata extraction.
 
 ## Setup
@@ -44,12 +47,19 @@ You can override the input and output folders with positional arguments:
 python preprocessing/dicom_tag_extractor.py /path/to/dicom-input /path/to/properties-output
 ```
 
-The script does not modify or copy the original DICOM files. Each output JSON aggregates the metadata for one patient and includes:
+By default, the script does not modify or copy the original DICOM files. Each
+output JSON aggregates the metadata for one patient and includes:
 
 - `common_properties` — tags with the same value across all processed files
 - `properties` — varying tags with occurrence counts, file counts, and file names for each value
 
 The extractor ignores empty values that are uniform across the patient, excludes DICOM values with VR `DA`, `DT`, or `TM`, and omits pixel data tags. Only the universal tag identifiers listed in `data/dicom_tag_reference.json` are retained. Some metadata may contain identifying information, so review outputs before sharing or storing them.
+
+By default, the input files are kept. Pass `--delete-input` to remove successfully processed DICOM files after the metadata aggregates have been written; skipped files are left untouched:
+
+```sh
+python preprocessing/dicom_tag_extractor.py --delete-input
+```
 
 To write a single aggregate for all files to a custom path instead of patient-level outputs, use:
 
@@ -102,6 +112,36 @@ The conversion process:
 - writes one PNG per frame for multiframe grayscale DICOMs
 
 By default, the input files are kept. Pass `--delete-input` to remove successfully converted DICOM files after export; skipped or failed files are left untouched.
+
+## Check PNG resolutions
+
+Recursively check that every PNG under `data/output/` is 512 x 512 pixels:
+
+```sh
+python preprocessing/resolution_check.py
+```
+
+The script reports files with unexpected dimensions or unreadable PNGs and exits
+with a nonzero status if any PNG fails validation. To check a different folder,
+pass it as an argument:
+
+```sh
+python preprocessing/resolution_check.py /path/to/png-output
+```
+
+## Check PNG grayscale
+
+Recursively check that PNGs under `data/output/` are grayscale:
+
+```sh
+python preprocessing/grayscale_check.py
+```
+
+To check a different folder, pass it as an argument:
+
+```sh
+python preprocessing/grayscale_check.py /path/to/png-output
+```
 
 ## Organize XML annotations
 
